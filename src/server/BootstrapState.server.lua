@@ -1,4 +1,3 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local StateContract = require(ReplicatedStorage:WaitForChild("State"):WaitForChild("StateContract"))
+local servicesFolder=serverFolder:WaitForChild("Services")
+local StateContract = require(servicesFolder:WaitForChild("StateContract"))
 StateContract.Ensure()

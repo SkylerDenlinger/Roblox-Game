@@ -1,6 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local StateContract = require(ReplicatedStorage:WaitForChild("State"):WaitForChild("StateContract"))
+local StateContract = require(script.Parent:WaitForChild("StateContract"))
 local RoundEvents = require(script.Parent:WaitForChild("RoundEvents"))
 
 local MatchService = {}

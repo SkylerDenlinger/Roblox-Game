@@ -7,8 +7,19 @@ local CollectiblesService = {}
 
 local TOUCH_COOLDOWN = 0.75
 
+local function requireChild(parent, name)
+	local c = parent:FindFirstChild(name)
+	if not c then
+		error(("CollectiblesService missing '%s' under %s"):format(name, parent:GetFullName()))
+	end
+	return c
+end
+
 local function getMatchPhase()
-	return ReplicatedStorage.State.MatchState.Phase.Value
+	local stateRoot = requireChild(ReplicatedStorage, "State")
+	local match = requireChild(stateRoot, "Match")
+	local phase = requireChild(match, "Phase")
+	return phase.Value
 end
 
 local function getPlayerFromHit(hit)
@@ -19,7 +30,11 @@ local function getPlayerFromHit(hit)
 end
 
 local function getPlayerKeysValue(player)
-	local pf = ReplicatedStorage.State.PlayerState:FindFirstChild(tostring(player.UserId))
+	local stateRoot = ReplicatedStorage:FindFirstChild("State")
+	if not stateRoot then return nil end
+	local ps = stateRoot:FindFirstChild("PlayerState")
+	if not ps then return nil end
+	local pf = ps:FindFirstChild(tostring(player.UserId))
 	if not pf then return nil end
 	return pf:FindFirstChild("Keys")
 end
@@ -76,7 +91,8 @@ function CollectiblesService.SpawnKeys(count)
 	local folder = ensureRoundFolders()
 	folder:ClearAllChildren()
 
-	local prefab = ServerStorage:WaitForChild("Prefabs"):WaitForChild("Key")
+	local prefabs = requireChild(ServerStorage, "Prefabs")
+	local prefab = requireChild(prefabs, "Key")
 
 	for i = 1, count do
 		local k = prefab:Clone()

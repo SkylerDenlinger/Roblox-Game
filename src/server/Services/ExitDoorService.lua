@@ -1,7 +1,7 @@
 local Players=game:GetService("Players")
 local ReplicatedStorage=game:GetService("ReplicatedStorage")
 local PhysicsService=game:GetService("PhysicsService")
-local StateContract=require(ReplicatedStorage:WaitForChild("State"):WaitForChild("StateContract"))
+local StateContract = require(script.Parent:WaitForChild("StateContract"))
 local RoundEvents=require(script.Parent:WaitForChild("RoundEvents"))
 local ExitDoorService={}
 local DOOR_GROUP="ExitDoor"

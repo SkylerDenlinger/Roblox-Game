@@ -1,10 +1,9 @@
-local ReplicatedStorage=game:GetService("ReplicatedStorage")
 print("RunMatchService: boot")
-local StateContract=require(ReplicatedStorage:WaitForChild("State"):WaitForChild("StateContract"))
-StateContract.Ensure()
-print("RunMatchService: state ensured")
 local serverFolder=script.Parent
 local servicesFolder=serverFolder:WaitForChild("Services")
+local StateContract = require(servicesFolder:WaitForChild("StateContract"))
+StateContract.Ensure()
+print("RunMatchService: state ensured")
 local PlayerStateService=require(servicesFolder:WaitForChild("PlayerStateService"))
 PlayerStateService.Start()
 print("RunMatchService: PlayerState started")
