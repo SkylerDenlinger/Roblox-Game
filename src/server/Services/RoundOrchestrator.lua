@@ -3,6 +3,7 @@ local StateContract = require(script.Parent:WaitForChild("StateContract"))
 local CollectiblesService = require(script.Parent:WaitForChild("CollectiblesService"))
 local QualificationService = require(script.Parent:WaitForChild("QualificationService"))
 local ExitDoorService = require(script.Parent:WaitForChild("ExitDoorService"))
+local QualificationZoneService=require(script.Parent:WaitForChild("QualificationZoneService"))
 
 local RoundOrchestrator = {}
 
@@ -24,6 +25,7 @@ function RoundOrchestrator.OnEnterPhase(phase)
 		QualificationService.SetQualifyCountFromActivePlayers()
 		ExitDoorService.ResetForNewRound()
 		ExitDoorService.SetEnabled(false)
+		QualificationZoneService.ResetForNewRound()
 	elseif phase == "Collectathon" then
 		CollectiblesService.SpawnKeys(KEY_COUNT)
 		ExitDoorService.SetEnabled(true)

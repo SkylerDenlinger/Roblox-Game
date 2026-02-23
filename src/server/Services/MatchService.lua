@@ -39,7 +39,7 @@ function MatchService.StartRun()
 	matchFolder.RunId.Value = newId()
 	matchFolder.RoundIndex.Value = 1
 	matchFolder.RoundId.Value = newId()
-	setPhase(matchFolder, PHASES.Lobby, 15)
+	setPhase(matchFolder, PHASES.Lobby, 3)
 end
 
 function MatchService.AdvancePhase()
@@ -48,7 +48,7 @@ function MatchService.AdvancePhase()
 	local phase = matchFolder.Phase.Value
 
 	if phase == PHASES.Lobby then
-		setPhase(matchFolder, PHASES.Countdown, 10)
+		setPhase(matchFolder, PHASES.Countdown, 3)
 	elseif phase == PHASES.Countdown then
 		setPhase(matchFolder, PHASES.Collectathon, 600)
 	elseif phase == PHASES.Collectathon then
