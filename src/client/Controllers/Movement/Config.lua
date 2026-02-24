@@ -1,21 +1,78 @@
 -- Config.lua
 local Config={}
-Config.ToggleKey=Enum.KeyCode.F
+Config.KeyboardMouse={
+	ToggleKey=Enum.KeyCode.F,
+	MoveKeys={
+		Forward=Enum.KeyCode.W,
+		Left=Enum.KeyCode.A,
+		Back=Enum.KeyCode.S,
+		Right=Enum.KeyCode.D
+	},
+	JumpKeys={Enum.KeyCode.Space},
+	SuperJumpKeys={Enum.KeyCode.Up},
+	ThrustDownKeys={Enum.KeyCode.Q},
+	ThrustUpKeys={Enum.KeyCode.E}
+}
+Config.Controller={
+	MoveThumbstick=Enum.KeyCode.Thumbstick1,
+	JumpKeys={Enum.KeyCode.ButtonA},
+	SuperJumpKeys={Enum.KeyCode.ButtonY},
+	ThrustDownKeys={Enum.KeyCode.ButtonL1},
+	ThrustUpKeys={Enum.KeyCode.ButtonR1}
+}
 Config.NormalWalkSpeed=30
 Config.ThrustInputSpeed=30
 Config.TurnResponsiveness=8
+Config.ThrustTurnScaling={
+	Enabled=true,
+	MinResponsiveness=3,
+	MaxResponsiveness=10
+}
+Config.UseThrustLevelSystem=true
+Config.ThrustLevels={
+	MinLevel=0,
+	MaxLevel=7,
+	StartLevel=1,
+	SpeedByLevel={
+		[0]=0,
+		[1]=5,
+		[2]=10,
+		[3]=15,
+		[4]=25,
+		[5]=40,
+		[6]=65,
+		[7]=100
+	}
+}
+Config.ThrustGearState={
+	StateRootName="State",
+	PlayerStateFolderName="PlayerState",
+	GearsValueName="Gears",
+	DebugOverrideGears=7
+}
 Config.UseServerThrustAttribute=true
 Config.ServerThrustAttributeName="ThrustSpeed"
-Config.ThrustOverride=50
+Config.ThrustOverride=nil
 Config.MaxTotalSpeed=nil
 Config.TerminalVelocity=-120
 Config.JumpForce=75
 Config.SuperJumpForce=100
+Config.SuperJumpScalesWithThrust=true
+Config.SuperJumpReferenceThrustLevel=5
+Config.SuperJumpScaleFlatten=0.4
 Config.GroundSnapDownSpeed=2
 Config.ThrustAnimationSpeed=0.5
-Config.JumpMaxVelocity=75
-Config.JumpTapMaxVelocity=22
+Config.JumpMaxVelocity=54
+Config.JumpTapMaxVelocity=50
 Config.JumpHoldAccel=400
 Config.JumpMaxHoldTime=0.16
+Config.JumpTapAutoHoldTime=0.08
 Config.JumpCutMultiplier=0.18
+Config.JumpTapFrames=5
+Config.JumpFullFrames=10
+Config.JumpTapHeightRatio=0.83
+Config.JumpHoldEaseOutPower=3
+Config.CoyoteTime=0.25
+Config.CoyoteFrames=15
+Config.MaxJumpCount=2
 return Config

@@ -2,7 +2,7 @@
 local Workspace=game:GetService("Workspace")
 local Gravity={}
 function Gravity:Apply(v,ctx)
-	if ctx.Grounded then
+	if ctx.TouchingGround then
 		return v
 	end
 	local y=v.Y-Workspace.Gravity*ctx.DeltaTime

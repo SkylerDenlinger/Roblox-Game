@@ -55,7 +55,7 @@ function Motor:ApplyVelocity(v)
 		self.linearVelocity.VectorVelocity=v
 	end
 end
-function Motor:ApplyRotation(dir,dt)
+function Motor:ApplyRotation(dir,dt,turnResponsiveness)
 	if not self.root then return end
 	self.root.AssemblyAngularVelocity=Vector3.zero
 	local p=self.root.Position
@@ -76,7 +76,7 @@ function Motor:ApplyRotation(dir,dt)
 		if d>math.pi then d=d-2*math.pi end
 		return d
 	end
-	local k=self.config.TurnSmoothing or self.config.TurnResponsiveness or 8
+	local k=turnResponsiveness or self.config.TurnSmoothing or self.config.TurnResponsiveness or 8
 	local alpha=1-math.exp(-k*(dt or 0))
 	self.currentYaw=self.currentYaw+shortestAngleDelta(self.currentYaw,targetYaw)*alpha
 	self.root.CFrame=CFrame.new(p)*CFrame.Angles(0,self.currentYaw,0)
