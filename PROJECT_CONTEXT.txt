@@ -1,0 +1,59 @@
+This is my roblox game repository.
+
+The game is a multiplayer speedrun collectathon based around collecting
+a predefined number of keys to open an exit door. Players can collect
+gears in addition to those keys to overclock their jetpack and move
+faster around the map.
+
+Features with the qualifier (LAUNCH) are features critical to the launch of
+the game and should be prioritized.
+
+Here is a good overview of how the game works.
+
+Round Gameplay
+    -Players spawn in in specified spawn zones. The game will choose
+    one of the provided spawn zones at random and spawn the entire lobby
+    into the map. A cutscene will play showing the highlighted keys and
+    gears. Players will run around the map with the goal of collecting A
+    certain number of keys and then opening the escape door. Every player
+    must collect enough keys if they wish to escape. One player opening the
+    door doesn't open it for everyone else. The players can also upgrade
+    their jetpack by collecting gears. Their jetpack will add a speed that
+    propells players forward constantly. Once the number of players who
+    have escaped reaches the max number, the round ends, and those players
+    form a new lobby to go into the next round. This continues until the
+    final round where only the first out wins.
+
+Online Play
+    -Regular(LAUNCH)
+        -This is the main mode players will play. I want this mode to be
+        dynamic in it's implementation. Ideally, we have enough concurrent
+        players to create lobbies of 50 players. I know at launch this is
+        unrealistic. For this reason we should create a dynamic queue that
+        samples the number of players in the queue. We should have an
+        accurate reading of how many players are currently queuing for a
+        game. Based on this reading we will determine both the lobby size
+        and number of rounds. This data should be easily modifiable. To
+        start I want under 40 players actively queuing to map to lobby 
+        sizes of 6. I want 41-100 players queuing to map to lobby sizes 
+        of 12. I want 101-500 players to map to lobby sizes of 25. and I 
+        want anything above 500 players in the queue to map to lobby sizes
+        of 50.
+
+        -The overview structure of the game is like this: lobbies of 50 will
+        play a round that cuts the qualifiers to 25. Lobbies of 25 will Play
+        a round that cuts the qualifiers to 12. Lobbies of 12 will play a round
+        that cuts the qualifiers to 6. Lobbies of 6 will play a round that
+        determines the winner. Based on the size of the lobby, the game will
+        dynamically account and choose which round to begin the players in.
+        As you can see, the game funnels down to a winner over numerous rounds.
+
+    -Ranked
+
+
+Here is how I want to structure the game:
+
+-The game must be very well structured. I don't want code randomly stuffed
+in a service because it can be and works now. I want almost all features
+related to gameplay to be executed in a way that highlights separation of
+concerns and modularity.
