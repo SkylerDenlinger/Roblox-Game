@@ -31,6 +31,7 @@ local lockedCameraFocus = nil
 local controls = nil
 
 local ui = nil
+local overlayGui = nil
 local partyRemotes = nil
 local lobbyRemotes = nil
 local partyPanelManualOpen = false
@@ -41,6 +42,8 @@ local playStatusText = nil
 local playStatusIsError = false
 local currentLobbyContext = "none"
 local lobbyPreviewMembers = {}
+local currentLobbyTarget = LOBBY_PLAYER_TARGET
+local menuStagingEnabled = true
 
 local homeCameraMotionEnabled = true
 local cameraMotionBlend = 1
@@ -869,6 +872,13 @@ local function disableControls()
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 end
 
+local function enableControls()
+	local playerControls = getControls()
+	if playerControls and playerControls.Enable then
+		playerControls:Enable()
+	end
+end
+
 local function lockCharacterMotion(character)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local root = character:FindFirstChild("HumanoidRootPart")
@@ -887,6 +897,102 @@ local function lockCharacterMotion(character)
 	root.AssemblyLinearVelocity = Vector3.zero
 	root.AssemblyAngularVelocity = Vector3.zero
 	root.Anchored = true
+end
+
+local function unlockCharacterMotion(character)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root then
+		return
+	end
+
+	root.Anchored = false
+	humanoid.AutoRotate = true
+	if humanoid.WalkSpeed <= 0 then
+		humanoid.WalkSpeed = 16
+	end
+	if humanoid.UseJumpPower then
+		if humanoid.JumpPower <= 0 then
+			humanoid.JumpPower = 50
+		end
+	else
+		if humanoid.JumpHeight <= 0 then
+			humanoid.JumpHeight = 7.2
+		end
+	end
+
+	local animateScript = character:FindFirstChild("Animate")
+	if animateScript and (animateScript:IsA("LocalScript") or animateScript:IsA("Script")) then
+		animateScript.Enabled = true
+	end
+end
+
+local function snapCameraBehindCharacter(character)
+	local camera = Workspace.CurrentCamera
+	if not camera or not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root then
+		return
+	end
+
+	local look = root.CFrame.LookVector
+	if look.Magnitude < 0.001 then
+		look = Vector3.new(0, 0, -1)
+	end
+
+	local cameraPos = root.Position - look * 12 + Vector3.new(0, 4, 0)
+	local focusPos = root.Position + Vector3.new(0, 2, 0)
+
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = CFrame.lookAt(cameraPos, focusPos)
+	camera.Focus = CFrame.new(focusPos)
+	camera.CameraSubject = humanoid
+	camera.CameraType = Enum.CameraType.Custom
+
+	-- Re-apply next frame so the default camera module keeps this starting orientation.
+	task.defer(function()
+		if localPlayer.Character ~= character then
+			return
+		end
+		if not root.Parent then
+			return
+		end
+		local deferredLook = root.CFrame.LookVector
+		if deferredLook.Magnitude < 0.001 then
+			deferredLook = Vector3.new(0, 0, -1)
+		end
+		local deferredPos = root.Position - deferredLook * 12 + Vector3.new(0, 4, 0)
+		local deferredFocus = root.Position + Vector3.new(0, 2, 0)
+		camera.CameraSubject = humanoid
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CFrame = CFrame.lookAt(deferredPos, deferredFocus)
+	end)
+end
+
+local function exitHomeScreenToGame()
+	menuStagingEnabled = false
+	if overlayGui then
+		overlayGui.Enabled = false
+	end
+
+	if cameraLockConn then
+		cameraLockConn:Disconnect()
+		cameraLockConn = nil
+	end
+	lockedCameraCFrame = nil
+	lockedCameraFocus = nil
+
+	setHomeCameraMotionEnabled(false, true)
+	enableControls()
+	local character = localPlayer.Character
+	if character then
+		unlockCharacterMotion(character)
+		snapCameraBehindCharacter(character)
+	end
 end
 
 local function resolveRunAnimationId(character, humanoid)
@@ -1169,16 +1275,18 @@ local function updateLobbyRosterUi()
 		return
 	end
 
-	local joinedCount = math.min(#lobbyPreviewMembers, LOBBY_PLAYER_TARGET)
+	local uiSlots = #ui.lobbySlotRows
+	local target = math.max(1, currentLobbyTarget or LOBBY_PLAYER_TARGET)
+	local joinedCount = math.min(#lobbyPreviewMembers, target)
 	local showRoster = isInPlayScreen and (isSearchingForMatch or currentLobbyContext == "lobby" or joinedCount > 0)
 	ui.lobbyRosterPanel.Visible = showRoster
 	if not showRoster then
 		return
 	end
 
-	ui.lobbyRosterCountLabel.Text = ("%d/%d"):format(joinedCount, LOBBY_PLAYER_TARGET)
+	ui.lobbyRosterCountLabel.Text = ("%d/%d"):format(joinedCount, target)
 
-	if joinedCount >= LOBBY_PLAYER_TARGET or currentLobbyContext == "lobby" then
+	if joinedCount >= target or currentLobbyContext == "lobby" then
 		ui.lobbyRosterStatusLabel.Text = "Round begins now"
 		ui.lobbyRosterStatusLabel.TextColor3 = THEME.orange
 	else
@@ -1186,7 +1294,7 @@ local function updateLobbyRosterUi()
 		ui.lobbyRosterStatusLabel.TextColor3 = THEME.offWhite
 	end
 
-	for i = 1, LOBBY_PLAYER_TARGET do
+	for i = 1, uiSlots do
 		local row = ui.lobbySlotRows[i]
 		local label = ui.lobbySlotLabels[i]
 		local member = lobbyPreviewMembers[i]
@@ -1234,6 +1342,7 @@ end
 
 local function snapshotLobbyMembersFromState(state)
 	local members = {}
+	local target = math.max(1, currentLobbyTarget or LOBBY_PLAYER_TARGET)
 	local source = nil
 	if state.context == "lobby" and type(state.lobby) == "table" and type(state.lobby.members) == "table" then
 		source = state.lobby.members
@@ -1247,7 +1356,7 @@ local function snapshotLobbyMembersFromState(state)
 		for _, entry in ipairs(source) do
 			if type(entry) == "table" then
 				table.insert(members, entry)
-				if #members >= LOBBY_PLAYER_TARGET then
+				if #members >= target then
 					break
 				end
 			end
@@ -1264,6 +1373,11 @@ local function applyLobbyState(state)
 
 	local context = state.context
 	currentLobbyContext = context or "none"
+	if type(state.targetLobbySize) == "number" then
+		currentLobbyTarget = math.max(1, math.floor(state.targetLobbySize))
+	else
+		currentLobbyTarget = LOBBY_PLAYER_TARGET
+	end
 	lobbyPreviewMembers = snapshotLobbyMembersFromState(state)
 	if context == "queued" then
 		isSearchingForMatch = true
@@ -1273,6 +1387,7 @@ local function applyLobbyState(state)
 	elseif context == "lobby" then
 		isSearchingForMatch = false
 		setPlayStatus("Lobby formed.", false)
+		exitHomeScreenToGame()
 	else
 		isSearchingForMatch = false
 		if playStatusText == "Lobby formed." or playStatusText == "Searching for match..." or playStatusText == "Cancelling search..." then
@@ -1656,10 +1771,16 @@ end
 local function bindHomeCameraLifecycle(gui)
 	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
 		if gui.Enabled then
+			if not menuStagingEnabled then
+				return
+			end
 			setHomeCameraMotionEnabled(true, false)
 			return
 		end
 
+		if not menuStagingEnabled then
+			return
+		end
 		setHomeCameraMotionEnabled(false, true)
 		resetCameraToLockedBase()
 	end)
@@ -1669,8 +1790,10 @@ local function bindHomeCameraLifecycle(gui)
 			return
 		end
 
-		setHomeCameraMotionEnabled(false, true)
-		resetCameraToLockedBase()
+		if menuStagingEnabled then
+			setHomeCameraMotionEnabled(false, true)
+			resetCameraToLockedBase()
+		end
 		if cameraLockConn then
 			cameraLockConn:Disconnect()
 			cameraLockConn = nil
@@ -1694,6 +1817,7 @@ local function stageCharacter(character)
 end
 
 local gui = getOrCreateGui()
+overlayGui = gui
 ui = buildOverlay(gui)
 bindHomeCameraLifecycle(gui)
 updatePlayScreenUi()
@@ -1705,9 +1829,19 @@ requestPartyState()
 
 localPlayer.CharacterAdded:Connect(function(character)
 	task.wait(0.1)
-	stageCharacter(character)
+	if menuStagingEnabled then
+		stageCharacter(character)
+	else
+		unlockCharacterMotion(character)
+		snapCameraBehindCharacter(character)
+	end
 end)
 
 if localPlayer.Character then
-	stageCharacter(localPlayer.Character)
+	if menuStagingEnabled then
+		stageCharacter(localPlayer.Character)
+	else
+		unlockCharacterMotion(localPlayer.Character)
+		snapCameraBehindCharacter(localPlayer.Character)
+	end
 end

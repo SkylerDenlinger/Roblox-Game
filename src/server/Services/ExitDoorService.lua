@@ -1,166 +1,166 @@
-local Players=game:GetService("Players")
-local ReplicatedStorage=game:GetService("ReplicatedStorage")
-local PhysicsService=game:GetService("PhysicsService")
-local StateContract=require(script.Parent:WaitForChild("StateContract"))
+local Players = game:GetService("Players")
+local PhysicsService = game:GetService("PhysicsService")
 
-local ExitDoorService={}
+local StateContract = require(script.Parent:WaitForChild("StateContract"))
+local PlayerStateService = require(script.Parent:WaitForChild("PlayerStateService"))
 
-local DOOR_GROUP="ExitDoor"
-local PASS_GROUP="DoorPass"
+local ExitDoorService = {}
 
-local doorAccess={}
-local keyConns={}
-local charConns={}
+local DOOR_GROUP = "ExitDoor"
+local PASS_GROUP = "DoorPass"
+local CLOSED_COLOR = Color3.fromRGB(0, 170, 255)
+local OPEN_COLOR = Color3.fromRGB(0, 255, 0)
 
-local doorPart=nil
-local enabled=false
+local doorPart = nil
+local roundEnabled = false
+local requiredKeys = 0
+local entrants = {}
+local granted = {}
+local grantedCount = 0
 
-local grantedCount=0
-
-local CLOSED_COLOR=Color3.fromRGB(0,170,255)
-local OPEN_COLOR=Color3.fromRGB(0,255,0)
-
-local function ensureGroups()
-	pcall(function() PhysicsService:RegisterCollisionGroup(DOOR_GROUP) end)
-	pcall(function() PhysicsService:RegisterCollisionGroup(PASS_GROUP) end)
-	PhysicsService:CollisionGroupSetCollidable(DOOR_GROUP,PASS_GROUP,false)
-end
-
-local function setCharacterGroup(character,groupName)
-	for _,d in ipairs(character:GetDescendants()) do
-		if d:IsA("BasePart") then
-			d.CollisionGroup=groupName
-		end
+local function setProgressDoorState(stateName)
+	local refs = StateContract.Get()
+	if refs.Progress:FindFirstChild("DoorState") then
+		refs.Progress.DoorState.Value = stateName
 	end
 end
 
-local function getKeysValue(player)
-	local refs=StateContract.Get()
-	local pf=refs.PlayerState:FindFirstChild(tostring(player.UserId))
-	if not pf then return nil end
-	return pf:FindFirstChild("Keys")
+local function ensureGroups()
+	pcall(function()
+		PhysicsService:RegisterCollisionGroup(DOOR_GROUP)
+	end)
+	pcall(function()
+		PhysicsService:RegisterCollisionGroup(PASS_GROUP)
+	end)
+	PhysicsService:CollisionGroupSetCollidable(DOOR_GROUP, PASS_GROUP, false)
 end
 
-local function getRequiredKeys()
-	local refs=StateContract.Get()
-	return refs.Progress.RequiredKeys.Value
+local function setCharacterGroup(character, groupName)
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CollisionGroup = groupName
+		end
+	end
 end
 
 local function updateDoorVisuals()
-	local refs=StateContract.Get()
-	if grantedCount>0 then
-		refs.Progress.DoorState.Value="Open"
+	if grantedCount > 0 then
+		setProgressDoorState("Open")
 		if doorPart then
-			doorPart.Color=OPEN_COLOR
+			doorPart.Color = OPEN_COLOR
 		end
 	else
-		refs.Progress.DoorState.Value="Closed"
+		setProgressDoorState("Closed")
 		if doorPart then
-			doorPart.Color=CLOSED_COLOR
+			doorPart.Color = CLOSED_COLOR
 		end
 	end
 end
 
-local function grantDoorAccess(player)
-	if doorAccess[player.UserId] then return end
-	doorAccess[player.UserId]=true
-	grantedCount+=1
-	if player.Character then
-		setCharacterGroup(player.Character,PASS_GROUP)
+local function hasEntrant(userId)
+	return entrants[userId] == true
+end
+
+local function grantAccessForUserId(userId)
+	if granted[userId] then
+		return false
+	end
+	granted[userId] = true
+	grantedCount += 1
+	local player = Players:GetPlayerByUserId(userId)
+	if player and player.Character then
+		setCharacterGroup(player.Character, PASS_GROUP)
 	end
 	updateDoorVisuals()
+	return true
 end
 
-local function revokeDoorAccess(player)
-	if not doorAccess[player.UserId] then return end
-	doorAccess[player.UserId]=nil
-	grantedCount=math.max(0,grantedCount-1)
-	if player.Character then
-		setCharacterGroup(player.Character,"Default")
+local function revokeAccessForUserId(userId)
+	if not granted[userId] then
+		return false
+	end
+	granted[userId] = nil
+	grantedCount = math.max(0, grantedCount - 1)
+	local player = Players:GetPlayerByUserId(userId)
+	if player and player.Character then
+		setCharacterGroup(player.Character, "Default")
 	end
 	updateDoorVisuals()
-end
-
-local function evaluate(player)
-	if not enabled then return end
-	if doorAccess[player.UserId] then return end
-	local keysVal=getKeysValue(player)
-	if not keysVal then return end
-	if keysVal.Value>=getRequiredKeys() then
-		grantDoorAccess(player)
-	end
-end
-
-local function wirePlayer(player)
-	if keyConns[player] then keyConns[player]:Disconnect() end
-	local keysVal=getKeysValue(player)
-	if not keysVal then return end
-	keyConns[player]=keysVal.Changed:Connect(function()
-		evaluate(player)
-	end)
-
-	if charConns[player] then charConns[player]:Disconnect() end
-	charConns[player]=player.CharacterAdded:Connect(function(character)
-		if doorAccess[player.UserId] then
-			setCharacterGroup(character,PASS_GROUP)
-		else
-			setCharacterGroup(character,"Default")
-		end
-	end)
-
-	evaluate(player)
-end
-
-function ExitDoorService.SetEnabled(on)
-	enabled=on and true or false
-	if enabled then
-		for _,p in ipairs(Players:GetPlayers()) do
-			wirePlayer(p)
-		end
-	end
-end
-
-function ExitDoorService.ResetForNewRound()
-	enabled=false
-	for _,p in ipairs(Players:GetPlayers()) do
-		revokeDoorAccess(p)
-	end
-	for plr,conn in pairs(keyConns) do
-		conn:Disconnect()
-		keyConns[plr]=nil
-	end
-	for plr,conn in pairs(charConns) do
-		conn:Disconnect()
-		charConns[plr]=nil
-	end
-	grantedCount=0
-	if doorPart then
-		doorPart.Color=CLOSED_COLOR
-		doorPart.CanCollide=true
-	end
-	local refs=StateContract.Get()
-	refs.Progress.DoorState.Value="Closed"
+	return true
 end
 
 function ExitDoorService.BindDoor(part)
 	ensureGroups()
-	doorPart=part
-	doorPart.CanTouch=true
-	doorPart.CanCollide=true
-	doorPart.Color=CLOSED_COLOR
-	doorPart.CollisionGroup=DOOR_GROUP
+	doorPart = part
+	if doorPart then
+		doorPart.CanTouch = true
+		doorPart.CanCollide = true
+		doorPart.CollisionGroup = DOOR_GROUP
+		doorPart.Color = CLOSED_COLOR
+	end
+end
 
-	Players.PlayerAdded:Connect(function(player)
-		if enabled then
-			wirePlayer(player)
+function ExitDoorService.StartRound(options)
+	options = options or {}
+	requiredKeys = math.max(0, math.floor(options.requiredKeys or 0))
+	entrants = {}
+	granted = {}
+	grantedCount = 0
+	for _, userId in ipairs(options.entrantUserIds or {}) do
+		entrants[userId] = true
+	end
+	roundEnabled = true
+	updateDoorVisuals()
+end
+
+function ExitDoorService.EndRound()
+	roundEnabled = false
+	for userId in pairs(granted) do
+		revokeAccessForUserId(userId)
+	end
+	granted = {}
+	grantedCount = 0
+	entrants = {}
+	if doorPart then
+		doorPart.Color = CLOSED_COLOR
+		doorPart.CanCollide = true
+	end
+	setProgressDoorState("Closed")
+end
+
+function ExitDoorService.EvaluateUser(userId)
+	if not roundEnabled or not hasEntrant(userId) then
+		return false
+	end
+	local keys = PlayerStateService.GetKeys(userId)
+	if keys >= requiredKeys then
+		return grantAccessForUserId(userId)
+	end
+	return false
+end
+
+function ExitDoorService.HasAccess(userId)
+	return granted[userId] == true
+end
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		if granted[player.UserId] then
+			setCharacterGroup(character, PASS_GROUP)
+		else
+			setCharacterGroup(character, "Default")
 		end
 	end)
+end)
 
-	for _,player in ipairs(Players:GetPlayers()) do
-		if enabled then
-			wirePlayer(player)
+for _, player in ipairs(Players:GetPlayers()) do
+	player.CharacterAdded:Connect(function(character)
+		if granted[player.UserId] then
+			setCharacterGroup(character, PASS_GROUP)
+		else
+			setCharacterGroup(character, "Default")
 		end
-	end
+	end)
 end
 
 return ExitDoorService

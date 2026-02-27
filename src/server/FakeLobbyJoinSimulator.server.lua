@@ -9,7 +9,7 @@ if not RunService:IsStudio() then
 	return
 end
 
-local ENABLED = true
+local ENABLED = false
 if not ENABLED then
 	return
 end
