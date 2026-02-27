@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local RoundRules = require(Shared:WaitForChild("RoundRules"))
@@ -16,6 +17,7 @@ local RoundRuntimeService = {}
 
 local stateReplicator = nil
 local activeRound = nil
+local TEMP_SPECTATE_BOT_NAME = "TempSpectateBot"
 
 local function makeEntrantSet(userIds)
 	local set = {}
@@ -30,6 +32,97 @@ local function waitSeconds(duration)
 	while os.clock() < finishAt do
 		task.wait(0.1)
 	end
+end
+
+local function destroyTempSpectateBot()
+	local existing = Workspace:FindFirstChild(TEMP_SPECTATE_BOT_NAME)
+	if existing then
+		existing:Destroy()
+	end
+end
+
+local function buildFallbackSpectateBot()
+	local model = Instance.new("Model")
+	model.Name = TEMP_SPECTATE_BOT_NAME
+
+	local root = Instance.new("Part")
+	root.Name = "HumanoidRootPart"
+	root.Size = Vector3.new(2, 2, 1)
+	root.Transparency = 1
+	root.CanCollide = false
+	root.Anchored = true
+	root.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = Vector3.new(2, 1, 1)
+	head.CanCollide = false
+	head.Anchored = true
+	head.Color = Color3.fromRGB(255, 170, 95)
+	head.Parent = model
+
+	local torso = Instance.new("Part")
+	torso.Name = "Torso"
+	torso.Size = Vector3.new(2, 2, 1)
+	torso.CanCollide = false
+	torso.Anchored = true
+	torso.Color = Color3.fromRGB(45, 60, 95)
+	torso.Parent = model
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.Name = "Humanoid"
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	humanoid.Parent = model
+
+	local rootWeld = Instance.new("WeldConstraint")
+	rootWeld.Part0 = root
+	rootWeld.Part1 = torso
+	rootWeld.Parent = root
+
+	local headWeld = Instance.new("WeldConstraint")
+	headWeld.Part0 = torso
+	headWeld.Part1 = head
+	headWeld.Parent = torso
+
+	model.PrimaryPart = root
+	return model
+end
+
+local function createTempSpectateBot(manifest)
+	destroyTempSpectateBot()
+
+	local botModel = nil
+	local ok, result = pcall(function()
+		return Players:CreateHumanoidModelFromUserId(1)
+	end)
+	if ok and result then
+		botModel = result
+	else
+		botModel = buildFallbackSpectateBot()
+	end
+
+	botModel.Name = TEMP_SPECTATE_BOT_NAME
+	botModel.Parent = Workspace
+
+	local anchorPoint = Vector3.new(0, 12, 0)
+	if manifest and manifest.spawnZones and #manifest.spawnZones > 0 then
+		anchorPoint = manifest.spawnZones[1].Position + Vector3.new(8, 4, 0)
+	end
+	botModel:PivotTo(CFrame.new(anchorPoint))
+
+	local root = botModel:FindFirstChild("HumanoidRootPart", true)
+	if root and root:IsA("BasePart") then
+		root.Anchored = true
+	end
+
+	local humanoid = botModel:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	end
+
+	return botModel
 end
 
 local function getCharacterRoot(player)
@@ -211,6 +304,7 @@ function RoundRuntimeService.RunRound(sessionId, roundSpec)
 	local mapId = roundSpec.mapId
 
 	local manifest = MapManifestLoader.Resolve(mapId)
+	local tempSpectateBot = createTempSpectateBot(manifest)
 	if manifest.exitDoor then
 		ExitDoorService.BindDoor(manifest.exitDoor)
 	end
@@ -234,6 +328,7 @@ function RoundRuntimeService.RunRound(sessionId, roundSpec)
 		qualifiedOrder = {},
 		keyCountByUserId = {},
 		firstKeyAtByUserId = {},
+		tempSpectateBot = tempSpectateBot,
 	}
 
 	PlayerStateService.ResetRoundStateForUserIds(entrantUserIds)
@@ -312,6 +407,7 @@ function RoundRuntimeService.RunRound(sessionId, roundSpec)
 	setPhase("Intermission", durations.Intermission)
 	waitSeconds(durations.Intermission)
 
+	destroyTempSpectateBot()
 	activeRound = nil
 	return {
 		qualifiedUserIds = qualified,
