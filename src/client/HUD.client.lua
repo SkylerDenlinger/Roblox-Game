@@ -1,22 +1,24 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+
+local ScreenFlowSignals = require(script.Parent:WaitForChild("ScreenFlowSignals"))
 
 local localPlayer = Players.LocalPlayer
 
 local HUD_NAME = "InRoundHUD"
-local ROOT_PANEL_NAME = "Panel"
 local TEMP_SPECTATE_BOT_NAME = "TempSpectateBot"
-local SESSION_VISIBLE_MATCH_VALUE = "SessionId"
-local SPECTATE_MIN_SECONDS = 5
-local SPECTATE_REFRESH_SECONDS = 0.5
+local MAX_LEADERBOARD_ROWS = 8
+local UPDATE_INTERVAL_SECONDS = 0.1
 
 local function waitForChildTimeout(parent, name, timeoutSeconds, context)
-	local t0 = os.clock()
+	local startedAt = os.clock()
 	local child = parent:FindFirstChild(name)
 	while not child do
-		if os.clock() - t0 >= timeoutSeconds then
-			error(("%s timed out waiting for '%s' under %s"):format(context or "InRoundHUD", name, parent:GetFullName()))
+		if os.clock() - startedAt >= timeoutSeconds then
+			error(("%s timed out waiting for '%s' under %s"):format(context or "HUD", name, parent:GetFullName()))
 		end
 		task.wait(0.05)
 		child = parent:FindFirstChild(name)
@@ -24,8 +26,18 @@ local function waitForChildTimeout(parent, name, timeoutSeconds, context)
 	return child
 end
 
+local function formatTime(seconds)
+	local clamped = math.max(0, math.floor((seconds or 0) + 0.5))
+	local minutes = math.floor(clamped / 60)
+	local remainder = clamped % 60
+	if minutes > 0 then
+		return ("%d:%02d"):format(minutes, remainder)
+	end
+	return tostring(remainder)
+end
+
 local function getOrCreateGui()
-	local playerGui = waitForChildTimeout(localPlayer, "PlayerGui", 10, "InRoundHUD")
+	local playerGui = waitForChildTimeout(localPlayer, "PlayerGui", 10, "HUD")
 	local existing = playerGui:FindFirstChild(HUD_NAME)
 	if existing and existing:IsA("ScreenGui") then
 		return existing
@@ -38,136 +50,308 @@ local function getOrCreateGui()
 	gui.Name = HUD_NAME
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 210
+	gui.DisplayOrder = 220
 	gui.Parent = playerGui
 	return gui
 end
 
-local function makeLabel(parent, name, positionY, textSize, textColor, alignment)
+local function makeLabel(parent, options)
 	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.AnchorPoint = Vector2.new(0, 0)
-	label.Position = UDim2.new(0, 14, 0, positionY)
-	label.Size = UDim2.new(1, -28, 0, 24)
-	label.BackgroundTransparency = 1
-	label.TextXAlignment = alignment or Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Center
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = textSize
-	label.TextColor3 = textColor
+	label.Name = options.name
+	label.AnchorPoint = options.anchorPoint or Vector2.new(0, 0)
+	label.Position = options.position
+	label.Size = options.size
+	label.BackgroundTransparency = options.backgroundTransparency or 1
+	label.BackgroundColor3 = options.backgroundColor3 or Color3.fromRGB(0, 0, 0)
+	label.BorderSizePixel = 0
+	label.Font = options.font or Enum.Font.Gotham
+	label.TextSize = options.textSize or 18
+	label.TextColor3 = options.textColor3 or Color3.fromRGB(255, 255, 255)
 	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.25
+	label.TextStrokeTransparency = options.textStrokeTransparency or 0.4
+	label.TextXAlignment = options.textXAlignment or Enum.TextXAlignment.Left
+	label.TextYAlignment = options.textYAlignment or Enum.TextYAlignment.Center
+	label.TextWrapped = options.textWrapped == true
+	label.Text = options.text or ""
 	label.Parent = parent
 	return label
 end
 
-local function buildHud(gui)
-	local existing = gui:FindFirstChild(ROOT_PANEL_NAME)
-	if existing and existing:IsA("Frame") then
-		existing:Destroy()
-	end
+local function makeFrame(parent, options)
+	local frame = Instance.new("Frame")
+	frame.Name = options.name
+	frame.AnchorPoint = options.anchorPoint or Vector2.new(0, 0)
+	frame.Position = options.position
+	frame.Size = options.size
+	frame.BackgroundColor3 = options.backgroundColor3 or Color3.fromRGB(18, 18, 18)
+	frame.BackgroundTransparency = options.backgroundTransparency or 0
+	frame.BorderSizePixel = 0
+	frame.Visible = options.visible ~= false
+	frame.Parent = parent
 
-	local panel = Instance.new("Frame")
-	panel.Name = ROOT_PANEL_NAME
-	panel.AnchorPoint = Vector2.new(0, 0)
-	panel.Position = UDim2.new(0, 16, 0, 16)
-	panel.Size = UDim2.new(0, 320, 0, 150)
-	panel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-	panel.BackgroundTransparency = 0.18
-	panel.BorderSizePixel = 0
-	panel.Visible = false
-	panel.Parent = gui
-
-	local panelStroke = Instance.new("UIStroke")
-	panelStroke.Color = Color3.fromRGB(0, 0, 0)
-	panelStroke.Thickness = 2
-	panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	panelStroke.Parent = panel
-
-	local title = makeLabel(panel, "Title", 10, 20, Color3.fromRGB(255, 196, 95))
-	title.Font = Enum.Font.GothamBlack
-	title.Text = "ROUND STATUS"
-
-	local keysLabel = makeLabel(panel, "Keys", 42, 18, Color3.fromRGB(255, 255, 255))
-	local gearsLabel = makeLabel(panel, "Gears", 68, 18, Color3.fromRGB(255, 255, 255))
-	local doorLabel = makeLabel(panel, "Door", 94, 18, Color3.fromRGB(255, 255, 255))
-	local qualifiedLabel = makeLabel(panel, "Qualified", 120, 18, Color3.fromRGB(255, 255, 255))
-
-	local spectateLabel = Instance.new("TextLabel")
-	spectateLabel.Name = "SpectateLabel"
-	spectateLabel.AnchorPoint = Vector2.new(0.5, 0)
-	spectateLabel.Position = UDim2.new(0.5, 0, 0, 16)
-	spectateLabel.Size = UDim2.new(0, 580, 0, 42)
-	spectateLabel.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
-	spectateLabel.BackgroundTransparency = 0.22
-	spectateLabel.BorderSizePixel = 0
-	spectateLabel.Font = Enum.Font.GothamBlack
-	spectateLabel.TextSize = 24
-	spectateLabel.TextColor3 = Color3.fromRGB(255, 196, 95)
-	spectateLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	spectateLabel.TextStrokeTransparency = 0.15
-	spectateLabel.Visible = false
-	spectateLabel.Parent = gui
-
-	local spectateStroke = Instance.new("UIStroke")
-	spectateStroke.Color = Color3.fromRGB(0, 0, 0)
-	spectateStroke.Thickness = 2
-	spectateStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	spectateStroke.Parent = spectateLabel
-
-	local resultsFrame = Instance.new("Frame")
-	resultsFrame.Name = "ResultsFrame"
-	resultsFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	resultsFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	resultsFrame.Size = UDim2.new(0, 560, 0, 260)
-	resultsFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-	resultsFrame.BackgroundTransparency = 0.12
-	resultsFrame.BorderSizePixel = 0
-	resultsFrame.Visible = false
-	resultsFrame.Parent = gui
-
-	local resultsStroke = Instance.new("UIStroke")
-	resultsStroke.Color = Color3.fromRGB(0, 0, 0)
-	resultsStroke.Thickness = 2
-	resultsStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	resultsStroke.Parent = resultsFrame
-
-	local resultsTitle = makeLabel(resultsFrame, "ResultsTitle", 20, 34, Color3.fromRGB(255, 196, 95), Enum.TextXAlignment.Center)
-	resultsTitle.Position = UDim2.new(0, 0, 0, 20)
-	resultsTitle.Size = UDim2.new(1, 0, 0, 40)
-	resultsTitle.Text = "ROUND COMPLETE"
-	resultsTitle.Font = Enum.Font.GothamBlack
-
-	local resultsSubtitle = makeLabel(resultsFrame, "ResultsSubtitle", 76, 24, Color3.fromRGB(255, 255, 255), Enum.TextXAlignment.Center)
-	resultsSubtitle.Position = UDim2.new(0, 0, 0, 76)
-	resultsSubtitle.Size = UDim2.new(1, 0, 0, 34)
-	resultsSubtitle.Text = ""
-
-	local resultsDetails = makeLabel(resultsFrame, "ResultsDetails", 124, 20, Color3.fromRGB(236, 242, 250), Enum.TextXAlignment.Center)
-	resultsDetails.Position = UDim2.new(0, 0, 0, 124)
-	resultsDetails.Size = UDim2.new(1, 0, 0, 30)
-	resultsDetails.Text = ""
-
-	local resultsFootnote = makeLabel(resultsFrame, "ResultsFootnote", 166, 16, Color3.fromRGB(255, 184, 90), Enum.TextXAlignment.Center)
-	resultsFootnote.Position = UDim2.new(0, 0, 0, 166)
-	resultsFootnote.Size = UDim2.new(1, 0, 0, 24)
-	resultsFootnote.Text = "Preparing next phase..."
-
-	return {
-		panel = panel,
-		keysLabel = keysLabel,
-		gearsLabel = gearsLabel,
-		doorLabel = doorLabel,
-		qualifiedLabel = qualifiedLabel,
-		spectateLabel = spectateLabel,
-		resultsFrame = resultsFrame,
-		resultsSubtitle = resultsSubtitle,
-		resultsDetails = resultsDetails,
-	}
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = options.strokeColor or Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = options.strokeThickness or 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = frame
+	return frame
 end
 
-local function toDoorOpen(doorState)
-	return string.lower(tostring(doorState or "")) == "open"
+local function makeButton(parent, options)
+	local button = Instance.new("TextButton")
+	button.Name = options.name
+	button.AnchorPoint = options.anchorPoint or Vector2.new(0, 0)
+	button.Position = options.position
+	button.Size = options.size
+	button.BackgroundColor3 = options.backgroundColor3 or Color3.fromRGB(255, 180, 82)
+	button.BackgroundTransparency = options.backgroundTransparency or 0
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	button.Font = options.font or Enum.Font.GothamBold
+	button.TextSize = options.textSize or 20
+	button.TextColor3 = options.textColor3 or Color3.fromRGB(17, 17, 17)
+	button.Text = options.text or ""
+	button.Visible = options.visible ~= false
+	button.Parent = parent
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = options.strokeColor or Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = button
+	return button
+end
+
+local function buildHud(gui)
+	gui:ClearAllChildren()
+
+	local statusPanel = makeFrame(gui, {
+		name = "StatusPanel",
+		position = UDim2.new(0, 18, 0, 18),
+		size = UDim2.new(0, 360, 0, 228),
+		backgroundTransparency = 0.18,
+	})
+
+	local phaseLabel = makeLabel(statusPanel, {
+		name = "PhaseLabel",
+		position = UDim2.new(0, 16, 0, 12),
+		size = UDim2.new(1, -32, 0, 28),
+		font = Enum.Font.GothamBlack,
+		textSize = 24,
+		textColor3 = Color3.fromRGB(255, 196, 95),
+		text = "ROUND STATUS",
+	})
+
+	local mapLabel = makeLabel(statusPanel, {
+		name = "MapLabel",
+		position = UDim2.new(0, 16, 0, 48),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local timerLabel = makeLabel(statusPanel, {
+		name = "TimerLabel",
+		position = UDim2.new(0, 16, 0, 74),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local keysLabel = makeLabel(statusPanel, {
+		name = "KeysLabel",
+		position = UDim2.new(0, 16, 0, 100),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local gearsLabel = makeLabel(statusPanel, {
+		name = "GearsLabel",
+		position = UDim2.new(0, 16, 0, 126),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local qualifyLabel = makeLabel(statusPanel, {
+		name = "QualifyLabel",
+		position = UDim2.new(0, 16, 0, 152),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local doorLabel = makeLabel(statusPanel, {
+		name = "DoorLabel",
+		position = UDim2.new(0, 16, 0, 178),
+		size = UDim2.new(1, -32, 0, 22),
+		textSize = 17,
+	})
+
+	local messageLabel = makeLabel(statusPanel, {
+		name = "MessageLabel",
+		position = UDim2.new(0, 16, 0, 204),
+		size = UDim2.new(1, -32, 0, 18),
+		textSize = 14,
+		textColor3 = Color3.fromRGB(244, 214, 142),
+		textWrapped = true,
+	})
+
+	local spectateLabel = makeLabel(gui, {
+		name = "SpectateLabel",
+		anchorPoint = Vector2.new(0.5, 0),
+		position = UDim2.new(0.5, 0, 0, 18),
+		size = UDim2.new(0, 620, 0, 42),
+		backgroundTransparency = 0.18,
+		backgroundColor3 = Color3.fromRGB(18, 18, 18),
+		font = Enum.Font.GothamBlack,
+		textSize = 22,
+		textColor3 = Color3.fromRGB(255, 196, 95),
+		textXAlignment = Enum.TextXAlignment.Center,
+		text = "",
+	})
+
+	local leaderboardFrame = makeFrame(gui, {
+		name = "LeaderboardFrame",
+		anchorPoint = Vector2.new(1, 0),
+		position = UDim2.new(1, -18, 0, 18),
+		size = UDim2.new(0, 360, 0, 278),
+		backgroundTransparency = 0.14,
+	})
+
+	makeLabel(leaderboardFrame, {
+		name = "LeaderboardTitle",
+		position = UDim2.new(0, 16, 0, 12),
+		size = UDim2.new(1, -32, 0, 28),
+		font = Enum.Font.GothamBlack,
+		textSize = 24,
+		textColor3 = Color3.fromRGB(255, 196, 95),
+		text = "LEADERBOARD",
+	})
+
+	local leaderboardRows = {}
+	for index = 1, MAX_LEADERBOARD_ROWS do
+		local row = makeFrame(leaderboardFrame, {
+			name = ("Row%d"):format(index),
+			position = UDim2.new(0, 14, 0, 44 + ((index - 1) * 28)),
+			size = UDim2.new(1, -28, 0, 24),
+			backgroundTransparency = 0.18,
+			backgroundColor3 = Color3.fromRGB(36, 36, 36),
+			strokeThickness = 1,
+		})
+		local rowLabel = makeLabel(row, {
+			name = "Label",
+			position = UDim2.new(0, 8, 0, 0),
+			size = UDim2.new(1, -16, 1, 0),
+			textSize = 15,
+			text = "",
+		})
+		table.insert(leaderboardRows, {
+			frame = row,
+			label = rowLabel,
+		})
+	end
+
+	makeLabel(leaderboardFrame, {
+		name = "LeaderboardHint",
+		position = UDim2.new(0, 16, 1, -30),
+		size = UDim2.new(1, -32, 0, 18),
+		textSize = 13,
+		textColor3 = Color3.fromRGB(210, 210, 210),
+		text = "Qualified players rank first by escape time.",
+	})
+
+	local resultsFrame = makeFrame(gui, {
+		name = "ResultsFrame",
+		anchorPoint = Vector2.new(0.5, 0.5),
+		position = UDim2.new(0.5, 0, 0.58, 0),
+		size = UDim2.new(0, 620, 0, 300),
+		backgroundTransparency = 0.08,
+		visible = false,
+	})
+
+	local resultsTitle = makeLabel(resultsFrame, {
+		name = "ResultsTitle",
+		position = UDim2.new(0, 0, 0, 22),
+		size = UDim2.new(1, 0, 0, 40),
+		font = Enum.Font.GothamBlack,
+		textSize = 36,
+		textColor3 = Color3.fromRGB(255, 196, 95),
+		textXAlignment = Enum.TextXAlignment.Center,
+		text = "",
+	})
+
+	local resultsSubtitle = makeLabel(resultsFrame, {
+		name = "ResultsSubtitle",
+		position = UDim2.new(0, 24, 0, 82),
+		size = UDim2.new(1, -48, 0, 34),
+		font = Enum.Font.GothamBold,
+		textSize = 24,
+		textColor3 = Color3.fromRGB(255, 255, 255),
+		textXAlignment = Enum.TextXAlignment.Center,
+		text = "",
+	})
+
+	local resultsDetails = makeLabel(resultsFrame, {
+		name = "ResultsDetails",
+		position = UDim2.new(0, 24, 0, 126),
+		size = UDim2.new(1, -48, 0, 56),
+		textSize = 18,
+		textColor3 = Color3.fromRGB(235, 241, 249),
+		textXAlignment = Enum.TextXAlignment.Center,
+		textWrapped = true,
+		text = "",
+	})
+
+	local resultsFootnote = makeLabel(resultsFrame, {
+		name = "ResultsFootnote",
+		position = UDim2.new(0, 24, 0, 188),
+		size = UDim2.new(1, -48, 0, 22),
+		textSize = 15,
+		textColor3 = Color3.fromRGB(255, 188, 102),
+		textXAlignment = Enum.TextXAlignment.Center,
+		textWrapped = true,
+		text = "",
+	})
+
+	local returnButton = makeButton(resultsFrame, {
+		name = "ReturnButton",
+		position = UDim2.new(0.5, -196, 1, -74),
+		size = UDim2.new(0, 180, 0, 44),
+		backgroundColor3 = Color3.fromRGB(228, 228, 228),
+		textColor3 = Color3.fromRGB(24, 24, 24),
+		text = "Menu",
+		visible = false,
+	})
+
+	local queueAgainButton = makeButton(resultsFrame, {
+		name = "QueueAgainButton",
+		position = UDim2.new(0.5, 16, 1, -74),
+		size = UDim2.new(0, 180, 0, 44),
+		backgroundColor3 = Color3.fromRGB(255, 188, 82),
+		textColor3 = Color3.fromRGB(20, 20, 20),
+		text = "Queue Again",
+		visible = false,
+	})
+
+	return {
+		gui = gui,
+		statusPanel = statusPanel,
+		phaseLabel = phaseLabel,
+		mapLabel = mapLabel,
+		timerLabel = timerLabel,
+		keysLabel = keysLabel,
+		gearsLabel = gearsLabel,
+		qualifyLabel = qualifyLabel,
+		doorLabel = doorLabel,
+		messageLabel = messageLabel,
+		spectateLabel = spectateLabel,
+		leaderboardFrame = leaderboardFrame,
+		leaderboardRows = leaderboardRows,
+		resultsFrame = resultsFrame,
+		resultsTitle = resultsTitle,
+		resultsSubtitle = resultsSubtitle,
+		resultsDetails = resultsDetails,
+		resultsFootnote = resultsFootnote,
+		returnButton = returnButton,
+		queueAgainButton = queueAgainButton,
+	}
 end
 
 local function getCharacterHumanoid(player)
@@ -197,18 +381,6 @@ local function getBotSpectateSubject()
 	return nil, nil
 end
 
-local function resolveSpectateSubject()
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player ~= localPlayer then
-			local humanoid = getCharacterHumanoid(player)
-			if humanoid then
-				return humanoid, player.DisplayName or player.Name
-			end
-		end
-	end
-	return getBotSpectateSubject()
-end
-
 local function applySpectateCamera(subject)
 	local camera = Workspace.CurrentCamera
 	if not camera or not subject then
@@ -230,107 +402,129 @@ local function restoreLocalCamera()
 	end
 end
 
+local function readIntValue(parent, name)
+	local node = parent and parent:FindFirstChild(name)
+	if node and node:IsA("IntValue") then
+		return node.Value
+	end
+	return 0
+end
+
+local function readNumberValue(parent, name)
+	local node = parent and parent:FindFirstChild(name)
+	if node and node:IsA("NumberValue") then
+		return node.Value
+	end
+	return 0
+end
+
+local function readBoolValue(parent, name)
+	local node = parent and parent:FindFirstChild(name)
+	if node and node:IsA("BoolValue") then
+		return node.Value
+	end
+	return false
+end
+
+local function readStringValue(parent, name)
+	local node = parent and parent:FindFirstChild(name)
+	if node and node:IsA("StringValue") then
+		return node.Value
+	end
+	return ""
+end
+
+local function toDoorOpen(doorState)
+	return string.lower(tostring(doorState or "")) == "open"
+end
+
 local function run()
 	local gui = getOrCreateGui()
 	local ui = buildHud(gui)
 
-	local stateRoot = waitForChildTimeout(ReplicatedStorage, "State", 20, "InRoundHUD")
-	local match = waitForChildTimeout(stateRoot, "Match", 20, "InRoundHUD")
-	local progress = waitForChildTimeout(stateRoot, "Progress", 20, "InRoundHUD")
-	local playerStateRoot = waitForChildTimeout(stateRoot, "PlayerState", 20, "InRoundHUD")
-
-	local requiredKeysValue = waitForChildTimeout(progress, "RequiredKeys", 20, "InRoundHUD")
-	local doorStateValue = waitForChildTimeout(progress, "DoorState", 20, "InRoundHUD")
-	local qualifyCountValue = waitForChildTimeout(progress, "QualifyCount", 20, "InRoundHUD")
-	local qualifiedCountValue = waitForChildTimeout(progress, "QualifiedCount", 20, "InRoundHUD")
-	local winnerUserIdValue = waitForChildTimeout(progress, "WinnerUserId", 20, "InRoundHUD")
-	local phaseValue = waitForChildTimeout(match, "Phase", 20, "InRoundHUD")
-	local sessionIdValue = waitForChildTimeout(match, SESSION_VISIBLE_MATCH_VALUE, 20, "InRoundHUD")
-
-	local model = {
-		keys = 0,
-		gears = 0,
-		requiredKeys = requiredKeysValue.Value,
-		doorState = doorStateValue.Value,
-		qualified = false,
-		qualifyCount = qualifyCountValue.Value,
-		qualifiedCount = qualifiedCountValue.Value,
-		winnerUserId = winnerUserIdValue.Value,
-		phase = phaseValue.Value,
-		sessionId = sessionIdValue.Value,
-	}
+	local stateRoot = waitForChildTimeout(ReplicatedStorage, "State", 20, "HUD")
+	local match = waitForChildTimeout(stateRoot, "Match", 20, "HUD")
+	local progress = waitForChildTimeout(stateRoot, "Progress", 20, "HUD")
+	local leaderboard = waitForChildTimeout(stateRoot, "Leaderboard", 20, "HUD")
+	local presentation = waitForChildTimeout(stateRoot, "Presentation", 20, "HUD")
+	local playerStateRoot = waitForChildTimeout(stateRoot, "PlayerState", 20, "HUD")
+	local leaderboardEntriesFolder = waitForChildTimeout(leaderboard, "Entries", 20, "HUD")
 
 	local spectate = {
 		active = false,
-		startedAt = 0,
-		targetName = "Waiting for target",
+		entryIndex = 1,
+		targets = {},
 	}
-	local resultsVisible = false
-	local previousQualified = false
+	local flowHidden = false
+	local hiddenSessionId = nil
+	local lastSessionId = ""
+	local lastUpdateAt = 0
 
-	local playerFolder = nil
-	local keysValue = nil
-	local gearsValue = nil
-	local qualifiedValue = nil
-
-	local folderChildAddedConn = nil
-	local keysChangedConn = nil
-	local gearsChangedConn = nil
-	local qualifiedChangedConn = nil
-
-	local function applyHud()
-		ui.panel.Visible = model.sessionId ~= ""
-		ui.keysLabel.Text = ("Keys: %d / %d"):format(model.keys, model.requiredKeys)
-		ui.gearsLabel.Text = ("Gears: %d"):format(model.gears)
-
-		local doorOpen = toDoorOpen(model.doorState)
-		ui.doorLabel.Text = ("Exit Door: %s"):format(doorOpen and "OPEN" or "CLOSED")
-		ui.doorLabel.TextColor3 = doorOpen and Color3.fromRGB(105, 255, 115) or Color3.fromRGB(255, 125, 125)
-
-		ui.qualifiedLabel.Text = ("Qualified: %s"):format(model.qualified and "YES" or "NO")
-		ui.qualifiedLabel.TextColor3 = model.qualified and Color3.fromRGB(105, 255, 115) or Color3.fromRGB(255, 255, 255)
+	local function readLeaderboardEntries()
+		local entries = {}
+		for _, child in ipairs(leaderboardEntriesFolder:GetChildren()) do
+			if child:IsA("Folder") then
+				table.insert(entries, {
+					rank = readIntValue(child, "Rank"),
+					userId = readIntValue(child, "UserId"),
+					displayName = readStringValue(child, "DisplayName"),
+					keys = readIntValue(child, "Keys"),
+					gears = readIntValue(child, "Gears"),
+					qualified = readBoolValue(child, "Qualified"),
+					isOnline = readBoolValue(child, "IsOnline"),
+				})
+			end
+		end
+		table.sort(entries, function(a, b)
+			return a.rank < b.rank
+		end)
+		return entries
 	end
 
-	local function hideResults()
-		resultsVisible = false
-		ui.resultsFrame.Visible = false
+	local function readModel()
+		local playerFolder = playerStateRoot:FindFirstChild(tostring(localPlayer.UserId))
+		return {
+			sessionId = readStringValue(match, "SessionId"),
+			phase = readStringValue(match, "Phase"),
+			phaseEndsAt = readNumberValue(match, "PhaseEndsServerTime"),
+			currentMapName = readStringValue(match, "CurrentMapName"),
+			requiredKeys = readIntValue(progress, "RequiredKeys"),
+			qualifyCount = readIntValue(progress, "QualifyCount"),
+			qualifiedCount = readIntValue(progress, "QualifiedCount"),
+			doorState = readStringValue(progress, "DoorState"),
+			presentationPrimary = readStringValue(presentation, "PrimaryText"),
+			presentationSecondary = readStringValue(presentation, "SecondaryText"),
+			presentationMessage = readStringValue(presentation, "Message"),
+			keys = readIntValue(playerFolder, "Keys"),
+			gears = readIntValue(playerFolder, "Gears"),
+			qualified = readBoolValue(playerFolder, "Qualified"),
+			placement = readIntValue(playerFolder, "Placement"),
+			resultMode = readStringValue(playerFolder, "ResultMode"),
+			lastRoundKeys = readIntValue(playerFolder, "LastRoundKeys"),
+			lastRoundGears = readIntValue(playerFolder, "LastRoundGears"),
+			leaderboardEntries = readLeaderboardEntries(),
+		}
 	end
 
-	local function showResults()
-		resultsVisible = true
-		ui.resultsFrame.Visible = true
-
-		if model.qualified then
-			ui.resultsSubtitle.Text = "You qualified for the next round"
-			ui.resultsSubtitle.TextColor3 = Color3.fromRGB(105, 255, 115)
-		else
-			ui.resultsSubtitle.Text = "You did not qualify"
-			ui.resultsSubtitle.TextColor3 = Color3.fromRGB(255, 125, 125)
+	local function getSpectateTargets(entries)
+		local targets = {}
+		for _, entry in ipairs(entries or {}) do
+			if entry.userId ~= localPlayer.UserId and entry.isOnline ~= false then
+				table.insert(targets, entry)
+			end
 		end
-
-		local winnerText = "Winner: TBD"
-		if model.winnerUserId and model.winnerUserId > 0 then
-			winnerText = ("Winner UserId: %d"):format(model.winnerUserId)
-		end
-		ui.resultsDetails.Text = ("%s  |  Qualified %d/%d"):format(winnerText, model.qualifiedCount, model.qualifyCount)
+		return targets
 	end
 
-	local function updateSpectateLabel()
-		if not spectate.active then
-			ui.spectateLabel.Visible = false
-			return
+	local function resolveSpectateSubject(entry)
+		if entry then
+			local player = Players:GetPlayerByUserId(entry.userId)
+			local humanoid = getCharacterHumanoid(player)
+			if humanoid then
+				return humanoid, entry.displayName
+			end
 		end
-
-		local elapsed = os.clock() - spectate.startedAt
-		local remaining = math.max(0, math.ceil(SPECTATE_MIN_SECONDS - elapsed))
-		local hasAllQualifiers = model.qualifyCount > 0 and model.qualifiedCount >= model.qualifyCount
-
-		if hasAllQualifiers and remaining > 0 then
-			ui.spectateLabel.Text = ("SPECTATING %s  |  RESULTS IN %ds"):format(spectate.targetName, remaining)
-		else
-			ui.spectateLabel.Text = ("SPECTATING %s"):format(spectate.targetName)
-		end
-		ui.spectateLabel.Visible = true
+		return getBotSpectateSubject()
 	end
 
 	local function stopSpectate()
@@ -338,225 +532,207 @@ local function run()
 			return
 		end
 		spectate.active = false
-		spectate.startedAt = 0
-		spectate.targetName = "Waiting for target"
+		spectate.entryIndex = 1
+		spectate.targets = {}
 		ui.spectateLabel.Visible = false
 		restoreLocalCamera()
 	end
 
-	local function shouldCompleteRoundForLocal()
-		return model.qualified and model.qualifyCount > 0 and model.qualifiedCount >= model.qualifyCount
-	end
-
-	local function maybeAdvanceToResults()
-		if not spectate.active then
-			return
-		end
-		if not shouldCompleteRoundForLocal() then
-			updateSpectateLabel()
-			return
-		end
-		local elapsed = os.clock() - spectate.startedAt
-		if elapsed < SPECTATE_MIN_SECONDS then
-			updateSpectateLabel()
-			return
-		end
-		stopSpectate()
-		showResults()
-	end
-
-	local function startSpectate()
-		if spectate.active then
-			return
-		end
+	local function startSpectate(entries)
+		spectate.targets = getSpectateTargets(entries)
 		spectate.active = true
-		spectate.startedAt = os.clock()
-		hideResults()
+		if spectate.entryIndex > #spectate.targets then
+			spectate.entryIndex = 1
+		end
+	end
 
-		task.spawn(function()
-			while spectate.active do
-				local subject, targetName = resolveSpectateSubject()
-				if subject then
-					applySpectateCamera(subject)
-					spectate.targetName = targetName or "Target"
+	local function cycleSpectate(offset)
+		if not spectate.active or #spectate.targets == 0 then
+			return
+		end
+		spectate.entryIndex += offset
+		if spectate.entryIndex < 1 then
+			spectate.entryIndex = #spectate.targets
+		elseif spectate.entryIndex > #spectate.targets then
+			spectate.entryIndex = 1
+		end
+	end
+
+	UserInputService.InputBegan:Connect(function(inputObject, gameProcessed)
+		if gameProcessed or not spectate.active then
+			return
+		end
+		if inputObject.KeyCode == Enum.KeyCode.Left then
+			cycleSpectate(-1)
+		elseif inputObject.KeyCode == Enum.KeyCode.Right then
+			cycleSpectate(1)
+		end
+	end)
+
+	ScreenFlowSignals.OnReturnToMenu(function()
+		flowHidden = true
+		hiddenSessionId = lastSessionId
+		stopSpectate()
+		ui.gui.Enabled = false
+	end)
+
+	ScreenFlowSignals.OnQueueAgain(function()
+		flowHidden = true
+		hiddenSessionId = lastSessionId
+		stopSpectate()
+		ui.gui.Enabled = false
+	end)
+
+	ui.returnButton.MouseButton1Click:Connect(function()
+		ScreenFlowSignals.FireReturnToMenu()
+	end)
+
+	ui.queueAgainButton.MouseButton1Click:Connect(function()
+		ScreenFlowSignals.FireQueueAgain()
+	end)
+
+	local function applyLeaderboard(entries)
+		ui.leaderboardFrame.Visible = #entries > 0 and lastSessionId ~= ""
+		for index = 1, MAX_LEADERBOARD_ROWS do
+			local row = ui.leaderboardRows[index]
+			local entry = entries[index]
+			if entry then
+				local suffix = entry.qualified and "QUAL" or ("%dK %dG"):format(entry.keys, entry.gears)
+				row.label.Text = ("#%d  %s  |  %s"):format(entry.rank, entry.displayName, suffix)
+				if entry.userId == localPlayer.UserId then
+					row.frame.BackgroundColor3 = Color3.fromRGB(76, 54, 18)
+					row.label.TextColor3 = Color3.fromRGB(255, 226, 164)
+				elseif entry.qualified then
+					row.frame.BackgroundColor3 = Color3.fromRGB(24, 64, 34)
+					row.label.TextColor3 = Color3.fromRGB(143, 255, 171)
 				else
-					spectate.targetName = "Waiting for target"
+					row.frame.BackgroundColor3 = Color3.fromRGB(36, 36, 36)
+					row.label.TextColor3 = Color3.fromRGB(255, 255, 255)
 				end
-				updateSpectateLabel()
-				maybeAdvanceToResults()
-				task.wait(SPECTATE_REFRESH_SECONDS)
+				row.frame.Visible = true
+			else
+				row.frame.Visible = false
 			end
-		end)
-	end
-
-	local function disconnectValueConnections()
-		if keysChangedConn then
-			keysChangedConn:Disconnect()
-			keysChangedConn = nil
-		end
-		if gearsChangedConn then
-			gearsChangedConn:Disconnect()
-			gearsChangedConn = nil
-		end
-		if qualifiedChangedConn then
-			qualifiedChangedConn:Disconnect()
-			qualifiedChangedConn = nil
 		end
 	end
 
-	local function handleQualifiedChanged(newValue)
-		model.qualified = newValue == true
-		applyHud()
-
-		if model.qualified and not previousQualified and model.sessionId ~= "" then
-			startSpectate()
-		end
-		if not model.qualified then
+	local function applySpectate(model)
+		if not model.qualified or model.phase ~= "Collectathon" or model.sessionId == "" then
 			stopSpectate()
-			hideResults()
-		end
-
-		previousQualified = model.qualified
-		maybeAdvanceToResults()
-	end
-
-	local function bindPlayerFolder(folder)
-		playerFolder = folder
-		disconnectValueConnections()
-		if folderChildAddedConn then
-			folderChildAddedConn:Disconnect()
-			folderChildAddedConn = nil
-		end
-
-		keysValue = nil
-		gearsValue = nil
-		qualifiedValue = nil
-
-		if not playerFolder then
-			model.keys = 0
-			model.gears = 0
-			handleQualifiedChanged(false)
 			return
 		end
-
-		local function hookValues()
-			keysValue = playerFolder:FindFirstChild("Keys")
-			gearsValue = playerFolder:FindFirstChild("Gears")
-			qualifiedValue = playerFolder:FindFirstChild("Qualified")
-
-			model.keys = (keysValue and keysValue.Value) or 0
-			model.gears = (gearsValue and gearsValue.Value) or 0
-			handleQualifiedChanged((qualifiedValue and qualifiedValue.Value) or false)
-			applyHud()
-
-			if keysValue and not keysChangedConn then
-				keysChangedConn = keysValue.Changed:Connect(function()
-					model.keys = keysValue.Value
-					applyHud()
-				end)
-			end
-			if gearsValue and not gearsChangedConn then
-				gearsChangedConn = gearsValue.Changed:Connect(function()
-					model.gears = gearsValue.Value
-					applyHud()
-				end)
-			end
-			if qualifiedValue and not qualifiedChangedConn then
-				qualifiedChangedConn = qualifiedValue.Changed:Connect(function()
-					handleQualifiedChanged(qualifiedValue.Value)
-				end)
+		if not spectate.active then
+			startSpectate(model.leaderboardEntries)
+		else
+			spectate.targets = getSpectateTargets(model.leaderboardEntries)
+			if spectate.entryIndex > math.max(1, #spectate.targets) then
+				spectate.entryIndex = 1
 			end
 		end
 
-		hookValues()
-		folderChildAddedConn = playerFolder.ChildAdded:Connect(function(child)
-			if child.Name == "Keys" or child.Name == "Gears" or child.Name == "Qualified" then
-				disconnectValueConnections()
-				hookValues()
-			end
-		end)
+		local targetEntry = spectate.targets[spectate.entryIndex]
+		local subject, targetName = resolveSpectateSubject(targetEntry)
+		if subject then
+			applySpectateCamera(subject)
+		end
+		ui.spectateLabel.Visible = true
+		ui.spectateLabel.Text = #spectate.targets > 0
+			and ("SPECTATING %s  |  LEFT/RIGHT TO CYCLE"):format(targetName or "Target")
+			or "SPECTATING TEMP BOT"
 	end
 
-	local function tryBindLocalPlayerFolder()
-		local folder = playerStateRoot:FindFirstChild(tostring(localPlayer.UserId))
-		bindPlayerFolder(folder)
-	end
-
-	requiredKeysValue.Changed:Connect(function()
-		model.requiredKeys = requiredKeysValue.Value
-		applyHud()
-	end)
-
-	doorStateValue.Changed:Connect(function()
-		model.doorState = doorStateValue.Value
-		applyHud()
-	end)
-
-	qualifyCountValue.Changed:Connect(function()
-		model.qualifyCount = qualifyCountValue.Value
-		maybeAdvanceToResults()
-		if resultsVisible then
-			showResults()
+	local function shouldShowResults(model)
+		if model.resultMode == "none" then
+			return false
 		end
-	end)
-
-	qualifiedCountValue.Changed:Connect(function()
-		model.qualifiedCount = qualifiedCountValue.Value
-		maybeAdvanceToResults()
-		if resultsVisible then
-			showResults()
-		end
-	end)
-
-	winnerUserIdValue.Changed:Connect(function()
-		model.winnerUserId = winnerUserIdValue.Value
-		if resultsVisible then
-			showResults()
-		end
-	end)
-
-	phaseValue.Changed:Connect(function()
-		model.phase = phaseValue.Value
-		if model.phase == "Lobby" and not model.qualified then
-			hideResults()
-			stopSpectate()
-		end
-	end)
-
-	sessionIdValue.Changed:Connect(function()
-		local previousSession = model.sessionId
-		model.sessionId = sessionIdValue.Value
-		applyHud()
-
 		if model.sessionId == "" then
-			stopSpectate()
-			hideResults()
+			return true
+		end
+		return model.phase == "RoundResults" or model.phase == "NextRoundTransition" or model.phase == "WinnerCeremony"
+	end
+
+	local function applyResults(model)
+		local visible = shouldShowResults(model)
+		ui.resultsFrame.Visible = visible
+		if not visible then
+			ui.returnButton.Visible = false
+			ui.queueAgainButton.Visible = false
 			return
 		end
 
-		if previousSession ~= model.sessionId then
-			hideResults()
-			if model.qualified then
-				startSpectate()
+		local title = "ROUND COMPLETE"
+		local subtitle = model.presentationPrimary ~= "" and model.presentationPrimary or "Round complete"
+		local details = ("Placement #%d  |  Keys %d  |  Gears %d"):format(
+			math.max(1, model.placement),
+			model.lastRoundKeys,
+			model.lastRoundGears
+		)
+		local footnote = model.presentationMessage
+
+		if model.resultMode == "winner" then
+			title = "WINNER"
+			subtitle = "You won the final round"
+			if model.presentationPrimary ~= "" then
+				footnote = model.presentationPrimary
 			end
+		elseif model.resultMode == "qualified" then
+			title = "QUALIFIED"
+			subtitle = "You advance to the next round"
+			footnote = model.presentationMessage ~= "" and model.presentationMessage or "Stay ready for the next lobby."
+		elseif model.resultMode == "eliminated" then
+			title = "ELIMINATED"
+			subtitle = "You did not qualify"
+			footnote = model.presentationMessage ~= "" and model.presentationMessage or "Return to menu or queue for another run."
 		end
-	end)
 
-	playerStateRoot.ChildAdded:Connect(function(child)
-		if child.Name == tostring(localPlayer.UserId) then
-			tryBindLocalPlayerFolder()
+		ui.resultsTitle.Text = title
+		ui.resultsSubtitle.Text = subtitle
+		ui.resultsDetails.Text = details
+		ui.resultsFootnote.Text = footnote
+
+		local allowPostgameActions = model.resultMode == "eliminated" or (model.resultMode == "winner" and model.sessionId == "")
+		ui.returnButton.Visible = allowPostgameActions
+		ui.queueAgainButton.Visible = allowPostgameActions
+	end
+
+	local function applyStatus(model)
+		local sessionActive = model.sessionId ~= ""
+		ui.statusPanel.Visible = sessionActive
+		ui.phaseLabel.Text = model.presentationPrimary ~= "" and model.presentationPrimary or string.upper(model.phase)
+		ui.mapLabel.Text = ("Map: %s"):format(model.currentMapName ~= "" and model.currentMapName or "TBD")
+		ui.timerLabel.Text = ("Timer: %s"):format(formatTime(model.phaseEndsAt - os.clock()))
+		ui.keysLabel.Text = ("Keys: %d / %d"):format(model.keys, model.requiredKeys)
+		ui.gearsLabel.Text = ("Gears: %d"):format(model.gears)
+		ui.qualifyLabel.Text = ("Qualified: %d / %d"):format(model.qualifiedCount, model.qualifyCount)
+		ui.doorLabel.Text = ("Door: %s"):format(toDoorOpen(model.doorState) and "OPEN" or "CLOSED")
+		ui.doorLabel.TextColor3 = toDoorOpen(model.doorState)
+			and Color3.fromRGB(112, 255, 118)
+			or Color3.fromRGB(255, 128, 128)
+		ui.messageLabel.Text = model.presentationMessage ~= "" and model.presentationMessage or model.presentationSecondary
+	end
+
+	RunService.RenderStepped:Connect(function()
+		if os.clock() - lastUpdateAt < UPDATE_INTERVAL_SECONDS then
+			return
 		end
-	end)
+		lastUpdateAt = os.clock()
 
-	playerStateRoot.ChildRemoved:Connect(function(child)
-		if child.Name == tostring(localPlayer.UserId) then
-			bindPlayerFolder(nil)
+		local model = readModel()
+		if flowHidden and model.sessionId ~= "" and model.sessionId ~= hiddenSessionId then
+			flowHidden = false
+			hiddenSessionId = nil
 		end
-	end)
+		lastSessionId = model.sessionId
+		ui.gui.Enabled = not flowHidden
+		if not ui.gui.Enabled then
+			return
+		end
 
-	tryBindLocalPlayerFolder()
-	applyHud()
-	updateSpectateLabel()
+		applyStatus(model)
+		applyLeaderboard(model.leaderboardEntries)
+		applySpectate(model)
+		applyResults(model)
+	end)
 end
 
 local ok, err = pcall(run)

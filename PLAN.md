@@ -1,120 +1,115 @@
-# Core Architecture Plan for Launch Public Mode
+# Mode And State Architecture Plan
 
 ## Summary
-Build a server-authoritative, modular tournament system that supports your launch mode (dynamic queue sizing, elimination rounds, keys/gears gameplay) with a hybrid deployment strategy: interfaces support full multi-place scale, while early development can still run in a single-place topology.
+The codebase should read as a pipeline:
 
-## Architecture Blueprint
-1. **Single bootstrap composition root**
-Create one startup script (`Main.server.lua`) that wires services in order and removes duplicate boot paths (`Start.server.lua` / legacy overlap).  
-Order: `StateContract -> Config -> Party -> QueueGateway -> Matchmaker -> SessionManager -> RoundRuntime -> StateReplicator`.
+`Bootstrap -> Social -> Matchmaking -> State -> Modes/<ModeName>`
 
-2. **Shared contracts and config layer (`src/shared`)**
-Add shared modules for strict contracts and tuning data:
-- `QueueBands`: `1-40=>6`, `41-100=>12`, `101-500=>25`, `501+=>50`.
-- `TournamentTemplates`: `50->25->12->6->1`, `25->12->6->1`, `12->6->1`, `6->1`.
-- `RoundRules`: phase durations, key/gear spawn counts, required keys.
-- `RemoteSchemas`: payload shapes for lobby/party/match state.
-- `FeatureFlags`: `queue_backend=local|memory_store`, `session_transport=in_server|teleport`.
+Shared infrastructure owns transport, replication, and lifecycle primitives.
+Each mode owns its own session flow, phase logic, and mode-specific state shaping.
+Regular is the canonical implementation today. Ranked should follow the same structure later rather than extending Regular with conditionals.
 
-3. **Domain modules (server)**
-Implement clear service boundaries:
-- `PartyService`: party lifecycle only.
-- `QueueService`: ticketing, cancel, queue population counting, policy lookup.
-- `MatchmakerService`: consumes queue tickets, forms lobby groups at dynamic target size, emits `SessionCreated`.
-- `TournamentPlanner`: creates round plan from starting lobby size.
-- `SessionManager`: owns tournament session lifecycle and entrants across rounds.
-- `RoundRuntimeService`: executes one round phases and returns qualifier list.
-- `GameplayServices`: key spawn/collect, gear spawn/collect, exit-door gating, qualification-zone checks.
-- `StateReplicator`: projects authoritative domain state into `ReplicatedStorage.State` and sends remote snapshots.
+## Canonical Ownership
 
-4. **Adapters for hybrid topology**
-Use interfaces so core logic is deployment-agnostic:
-- `QueueBackendAdapter`: `LocalQueueAdapter` (dev) and `MemoryStoreQueueAdapter` (prod universe-wide).
-- `SessionTransportAdapter`: `InServerSessionAdapter` (dev) and `TeleportSessionAdapter` (reserved servers).
-- `PersistenceAdapter`: stubbed for launch public mode, extensible for ranked/MMR later.
+### `src/server/Bootstrap`
+- Composes the runtime once.
+- Wires shared infrastructure before any mode logic runs.
 
-5. **Round and qualification behavior (locked decisions)**
-- Timer timeout ends the round immediately.
-- Qualifier contention uses first authoritative server timestamp.
-- If timeout ends with zero qualifiers, apply deterministic fallback promotion: highest keys, then earliest key timestamp, then lowest userId.
-- Final round winner is first valid qualifier in `6->1`.
+### `src/server/Social`
+- Party and social coordination only.
+- Must not know round phases, collectibles, or winners.
 
-6. **Map/gameplay runtime contract**
-Define `MapManifest` per map:
-- `spawnZones`, `keySpawnPoints`, `gearSpawnPoints`, `exitDoor`, `qualificationZone`, `introCutsceneNodes`.
-Round runtime consumes only this manifest; no hardcoded workspace names outside manifest loader.
+### `src/server/Matchmaking`
+- Owns queueing, target sizing, fallback formation, and session creation.
+- Stops at `session formed`.
+- Must not know doors, collectibles, cutscenes, or spectate presentation.
 
-## Public API / Interface Changes
-1. **Keep existing remotes for compatibility**
-Keep `PartyGetState`, `PartyInvite`, `PartyRespondInvite`, `PartyLeave`, `PartyUpdated`, `PartyMessage`, `LobbyGetState`, `LobbyCommand`, `LobbyUpdated`, `LobbyMessage`.
+### `src/server/State`
+- Owns replicated state infrastructure shared by all modes.
+- Defines the replicated tree, remote contract setup, and per-player replicated folders.
+- Does not contain mode rules.
 
-2. **Extend lobby snapshot schema**
-`LobbyGetState`/`LobbyUpdated` payload adds:
-- `queuePopulation`
-- `targetLobbySize`
-- `tournamentPath` (example `[25,12,6,1]`)
-- `estimatedRounds`
-- `sessionId` when formed
+### `src/server/Modes/Regular`
+- Owns the full Regular tournament.
+- `Session/` decides which round runs next.
+- `Pregame/` owns map selection, runtime map loading, spawn planning, and countdown setup.
+- `Gameplay/` owns collectibles, leaderboard ordering, qualification, and exit-door access.
+- `Ending/` owns round results, advancement, and winner presentation.
+- `State/` owns Regular lifecycle transitions and Regular-specific state semantics.
 
-3. **State tree additions**
-Extend `ReplicatedStorage/State` minimally:
-- `Match`: `SessionId`, `EntrantCount`, `RoundTargetQualifiers`.
-- `Progress`: `EscapedCount`, `RemainingQualifierSlots`.
-- `PlayerState/<UserId>`: `Qualified` (Bool), `QualifiedAtServerTime` (Number), keep `Keys`, `Gears`, `Thrust`.
+### `src/shared`
+- `Config/` is the canonical home for tuning and templates.
+- `Contracts/` is the canonical home for payload/schema definitions.
+- `Content/` is the canonical home for map/content manifests.
+- Root shared files are compatibility shims only.
 
-4. **Internal service interfaces**
-Define explicit methods:
-- `QueueService.JoinPublic(leaderUserId, memberUserIds) -> Result`
-- `QueueService.Cancel(leaderUserId) -> Result`
-- `MatchmakerService.Tick(now) -> {formedSessions}`
-- `SessionManager.StartSession(sessionSpec)`
-- `RoundRuntimeService.RunRound(sessionId, roundSpec) -> RoundResult`
+## State Architecture
 
-## Implementation Plan (decision-complete)
-1. **Phase 1: Foundation**
-Unify bootstrap, remove duplicate startup paths, move constants into shared config, keep current behavior stable.
+### Shared State Layer
+Shared state infrastructure exists once and is mode-agnostic.
 
-2. **Phase 2: Contracts + state projection**
-Add shared schemas/config and a dedicated `StateReplicator`; migrate direct service writes to domain-state then projection.
+- `SessionStateController`
+  - Starts `StateContract`, `StateReplicator`, and `PlayerStateService`.
+  - Is the shared entrypoint every mode depends on.
+- `StateContract`
+  - Creates and validates the replicated folder/value tree under `ReplicatedStorage`.
+- `StateReplicator`
+  - Writes authoritative server state into the replicated tree.
+  - Owns projection, not business rules.
+- `PlayerStateService`
+  - Owns per-player replicated folders and common per-player value helpers.
 
-3. **Phase 3: Queue + matchmaker**
-Refactor `LobbyService` into `QueueService` + `MatchmakerService`; implement queue bands and tournament planner output.
+### Mode State Layer
+Each mode gets its own state controller and round/session state shaping.
 
-4. **Phase 4: Session + round runtime**
-Introduce `SessionManager` and `RoundRuntimeService`; port existing round/door/qualification logic under round runtime hooks.
+- `RegularStateController`
+  - Starts a Regular run.
+  - Resets Regular back to idle after a session completes.
+- `RegularRoundContext`
+  - Bridges Regular phase logic to replicated state during one round.
+  - Owns spawn plans, leaderboard refreshes, qualification ordering, placements, and presentation updates for that round.
+- Future `RankedStateController`
+  - Should follow the same pattern without modifying Regular logic.
 
-5. **Phase 5: Gears as first-class collectible**
-Split collectibles into `KeyCollectibleService` and `GearCollectibleService`; gears increment `PlayerState.Gears` and feed movement unlock path.
+### Replicated Tree
+The shared tree is stable and mode-safe:
 
-6. **Phase 6: Global queue adapter**
-Implement `MemoryStoreQueueAdapter` with lock-safe pop/form behavior; keep `LocalQueueAdapter` for Studio testing.
+- `State/Match`
+  - universal run and round metadata
+  - phase, mode, session id, round id, map ids, timers, entrant counts
+- `State/Progress`
+  - universal round outcome counters
+  - required keys, qualified count, escaped count, remaining slots, winner id, door state
+- `State/Leaderboard`
+  - ordered round standings and spectate ordering
+- `State/Presentation`
+  - UI-facing phase and result presentation
+  - primary/secondary text, message, showcased collectibles, spectate target
+- `State/PlayerState/<UserId>`
+  - per-player replicated round data
+  - keys, gears, qualified, placement, result mode, elimination state, last-round stats
 
-7. **Phase 7: Teleport adapter (optional in staged rollout)**
-Add reserved-server transport path; keep in-server adapter as fallback until stable.
+## Regular Runtime Flow
+1. `ServerBootstrap` starts shared state infrastructure.
+2. `MatchmakerService` forms a session.
+3. `RegularSessionManager` accepts the session and delegates execution to `RegularSessionFlowController`.
+4. `RegularSessionFlowController` resolves the tournament path and loops rounds until a winner exists.
+5. `RegularRoundRuntimeService` runs:
+   - `PregamePhase`
+   - `GameplayPhase`
+   - `EndingPhase`
+6. `RegularRoundContext` updates leaderboard, progress, presentation, and player placements during the round.
+7. `RegularStateController.ResetToIdle()` returns the mode to idle when the session ends.
 
-8. **Phase 8: Hardening**
-Add telemetry events (`queue_joined`, `session_created`, `round_ended`, `player_qualified`, `session_winner`) and fail-safe recovery on server shutdowns.
+## Clarity Rules
+- Shared state infrastructure must not branch on mode behavior.
+- Mode logic must not live in `server/State`.
+- Matchmaking must stop at `session formed`.
+- Phase folders should answer `when does this run?`
+- Mode state folders should answer `who owns this state?`
+- Legacy `Services/` and shared root files are compatibility shims only and should not receive new logic.
 
-## Test Cases and Scenarios
-1. Queue band mapping boundaries: `40->6`, `41->12`, `100->12`, `101->25`, `500->25`, `501->50`.
-2. Tournament plan generation for start sizes `6`, `12`, `25`, `50`.
-3. Party queue join/cancel with leader-only constraints.
-4. Deterministic tie-break on last qualifier slot using server timestamp.
-5. Timeout round ending with partial qualifiers and with zero qualifiers fallback.
-6. Gear collection increments `Gears` and updates thrust unlock behavior.
-7. Exit door gating requires per-player required keys; one player opening does not globally open for others.
-8. State replication consistency between domain state and `ReplicatedStorage/State`.
-9. Matchmaker concurrency safety under simultaneous queue joins/cancels.
-10. Adapter parity tests: local queue backend vs memory-store backend return identical session specs for same input stream.
-11. End-to-end tournament run: `25` entrants funnels to one winner through expected round path.
-12. Client compatibility test: existing homepage lobby/party UI still functions with extended payloads.
-
-## Assumptions and Defaults Chosen
-1. Launch-critical scope is Public/Regular mode; Ranked is interface-ready but not implemented now.
-2. Queue sizing is universe-wide in production (MemoryStore-backed), local fallback in dev.
-3. Hybrid staged topology is the target: architecture supports multi-place, development can run single-place.
-4. Queue bands are fixed to `1-40`, `41-100`, `101-500`, `501+`.
-5. Timeout ends round immediately; no auto-extension.
-6. Tie-break is authoritative server timestamp.
-7. If no qualifiers on timeout, deterministic fallback promotion applies.
-8. Current party capacity remains unchanged unless product decision updates it later.
+## Next Steps
+1. Mirror the same folder and controller pattern for `Modes/Ranked`.
+2. Split client Regular UI into `Pregame`, `Gameplay`, and `Ending` folders to match the server flow.
+3. Delete legacy shims only after all references move to canonical folders.

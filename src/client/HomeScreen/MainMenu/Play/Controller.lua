@@ -270,22 +270,54 @@ function PlayController:BindLobbyUi()
 	self.lobbyUiBound = true
 end
 
+function PlayController:ShowMainMenu()
+	self.isInPlayScreen = false
+	self:RequestLobbyState()
+	self:UpdatePlayScreenUi()
+end
+
+function PlayController:ShowPlayScreen()
+	self.isInPlayScreen = true
+	self:RequestLobbyState()
+	self:UpdatePlayScreenUi()
+end
+
+function PlayController:QueueAgainFromResults()
+	self.isInPlayScreen = true
+	self:RequestLobbyState()
+	if self.currentLobbyContext == "none" and not self.isSearchingForMatch then
+		local ok = self:StartSearch()
+		if ok then
+			self.currentLobbyContext = "queued"
+			self.lobbyPreviewMembers = {
+				{
+					userId = self.localPlayer.UserId,
+					name = self.localPlayer.Name,
+					displayName = self.localPlayer.DisplayName,
+				},
+			}
+			self.isSearchingForMatch = true
+			self:SetPlayStatus(nil, false)
+		else
+			self:SetPlayStatus("Queue unavailable", true)
+		end
+	end
+	self:UpdatePlayScreenUi()
+end
+
 function PlayController:BindPlayUi()
 	if self.playUiBound then
 		return
 	end
 	self.ui.playButton.MouseButton1Click:Connect(function()
-		self.isInPlayScreen = true
-		self:RequestLobbyState()
-		self:UpdatePlayScreenUi()
+		self:ShowPlayScreen()
 	end)
 
 	self.ui.playMainMenuButton.MouseButton1Click:Connect(function()
 		if self.isSearchingForMatch then
 			self:CancelSearch()
 		end
-		self.isInPlayScreen = false
-		self:UpdatePlayScreenUi()
+		self:ShowMainMenu()
 	end)
 
 	self.ui.playSearchButton.MouseButton1Click:Connect(function()

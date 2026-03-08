@@ -24,6 +24,7 @@ Round Gameplay
     form a new lobby to go into the next round. This continues until the
     final round where only the first out wins.
 
+
 Online Play
     -Regular(LAUNCH)
         -This is the main mode players will play. I want this mode to be
@@ -47,6 +48,62 @@ Online Play
         determines the winner. Based on the size of the lobby, the game will
         dynamically account and choose which round to begin the players in.
         As you can see, the game funnels down to a winner over numerous rounds.
+
+        Regular game structure:
+            1. Modular lobby creation
+                -The lobby creation will be modular and based on current
+                player counts. This way, players will not be waiting for
+                full 50 player lobbies if the player count doesn't support
+                it
+            2. Map auto selection
+                -Server selects from a map pool which map to play on
+            3. Map cutscene plays upon load
+            4. Brief waiting for players notification
+            5. Collectible spawn locations are generated
+                -Make the collectible spawn locations exist with their 
+                respective map. Make this modular so that collectible
+                spawns are easily added and removed. Make the collectible
+                spawn logic random. Make the collectible spawn logic
+                dependent on the collectible's spawn rank (Higher ranked
+                spawn positions are more likely to spawn). Again, 
+                construct this to be modular because I will be altering it
+            6. Cutscene plays to show spots of several (not all) collectibles
+                -Make this cutscene display the most prominent collectibles.
+                To explain, the collectibles will have a value ranking.
+                This means that the cutscene will show the most easy to get
+                and open collectibles.
+            7. Countdown
+                -Server authority countdown timer that then begins the
+                Collectathon phase of the round. During this the amount of
+                players that qualify are displayed above the timer and so
+                is the amount of keys required to escape.
+            8. Collectathon phase - main gameplay
+                -The collectathon phase is the main gameplay which runs
+                until either a maximum of 5 minutes or the necessary amount
+                of players have successfully qualified. Remember that the
+                amount of players set to qualify is based upon the dynamic
+                lobby creation logic. 50->25->12->6->1. Note that upon
+                a player's qualification for the next round, they should begin
+                spectating. The player should begin spectating the player in
+                the lead and be able to swap between players to spectate based
+                on the round leaderboard. Note that there will be a server based
+                round leaderboard that calculates who is in first, second, etc.
+                This leaderboard will be an onscreen ui in the top right of the
+                screen.
+            9. Post-qualification
+                -Non qualifying players will be taken to a postgame screen that
+                allows them to go back to the menu or search for another game.
+                Qualifying players will be met with a brief you qualified screen
+                that shows their player emoting and some music will play. They
+                will see what order they qualified in on the leaderboard and how
+                many collectibles they picked up that round. After 10-15 seconds
+                the server will take the qualified players (assuming that this
+                isn't the final round) and create another lobby with just these players.
+                Then this lobby will play another round begining with map selection.
+            10. If it is the final round
+                -If it is the final round there needs to be special qualifiers to
+                differentiate it from the other rounds. Firstly, there will be a
+                win screen for the one player that qualifies first.
 
     -Ranked
 

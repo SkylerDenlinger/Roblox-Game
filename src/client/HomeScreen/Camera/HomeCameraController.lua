@@ -363,6 +363,18 @@ function HomeCameraController:ExitHomeScreenToGame()
 	end
 end
 
+function HomeCameraController:EnterHomeScreenFromGame()
+	self.menuStagingEnabled = true
+	if self.overlayGui then
+		self.overlayGui.Enabled = true
+	end
+	self:SetHomeCameraMotionEnabled(true, true)
+	local character = self.localPlayer.Character
+	if character then
+		self:StageCharacter(character)
+	end
+end
+
 function HomeCameraController:BindHomeCameraLifecycle(gui)
 	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
 		if gui.Enabled then

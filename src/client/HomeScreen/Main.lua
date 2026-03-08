@@ -14,6 +14,7 @@ local OverlayBuilder = require(root:WaitForChild("UI"):WaitForChild("OverlayBuil
 local HomeCameraController = require(root:WaitForChild("Camera"):WaitForChild("HomeCameraController"))
 local PlayController = require(root:WaitForChild("MainMenu"):WaitForChild("Play"):WaitForChild("Controller"))
 local InviteFriendsController = require(root:WaitForChild("InviteFriends"):WaitForChild("InviteFriendsController"))
+local ScreenFlowSignals = require(root.Parent:WaitForChild("ScreenFlowSignals"))
 
 local HomeScreenMain = {}
 
@@ -62,6 +63,16 @@ function HomeScreenMain.Start()
 	end)
 	playController:SetOnLobbyFormed(function()
 		cameraController:ExitHomeScreenToGame()
+	end)
+
+	ScreenFlowSignals.OnReturnToMenu(function()
+		cameraController:EnterHomeScreenFromGame()
+		playController:ShowMainMenu()
+	end)
+
+	ScreenFlowSignals.OnQueueAgain(function()
+		cameraController:EnterHomeScreenFromGame()
+		playController:QueueAgainFromResults()
 	end)
 
 	playController:UpdatePlayScreenUi()
